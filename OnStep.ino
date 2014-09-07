@@ -92,6 +92,7 @@
  * 06-23-2014          0.99b18           Refinement of tracking commands in Command.ino, fixed Park/Unpark bug (int temporary storage should be long) in Park.ino and OnStep.ino
  * 06-23-2014          0.99b19           Fixes to Timer.ino and OnStep.ino to reduce jitter on Teensy3.1
  * 08-01-2014          0.99b20           Numeric conversion fixes, DEC_RATIO_ON now MaxRate for Dec is adjusted to yield same deg/sec as HA
+ * 09-07-2014          0.99b21           Fix for empty site name return command framing problem
  *
  *
  * Author: Howard Dutton
@@ -142,8 +143,8 @@
 #include "errno.h"
 
 // firmware info, these are returned by the ":GV?#" commands
-#define FirmwareDate   "06 23 14"
-#define FirmwareNumber "0.99b19"
+#define FirmwareDate   "09 07 14"
+#define FirmwareNumber "0.99b21"
 #define FirmwareName   "On-Step"
 #define FirmwareTime   "12:00:00"
 
