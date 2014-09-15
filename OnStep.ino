@@ -93,6 +93,7 @@
  * 06-23-2014          0.99b19           Fixes to Timer.ino and OnStep.ino to reduce jitter on Teensy3.1
  * 08-01-2014          0.99b20           Numeric conversion fixes, DEC_RATIO_ON now MaxRate for Dec is adjusted to yield same deg/sec as HA
  * 09-07-2014          0.99b21           Fix for empty site name return command framing problem
+ * 09-15-2014          0.99b22           Added code to stop gotos with the :Q# command
  *
  *
  * Author: Howard Dutton
@@ -143,8 +144,8 @@
 #include "errno.h"
 
 // firmware info, these are returned by the ":GV?#" commands
-#define FirmwareDate   "09 07 14"
-#define FirmwareNumber "0.99b21"
+#define FirmwareDate   "09 15 14"
+#define FirmwareNumber "0.99b22"
 #define FirmwareName   "On-Step"
 #define FirmwareTime   "12:00:00"
 
