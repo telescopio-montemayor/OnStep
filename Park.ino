@@ -11,12 +11,12 @@ boolean setPark() {
     // turn off PEC for a moment
     cli(); long l = PEC_HA; PEC_HA=0; sei();
     
-    // SiderealRate (which is really twice the sidereal rate and another 10X = 20X speed), ignore rate ratios - we're working in steps
+    // SiderealRate (x20 speed), ignore rate ratios - we're working in steps
     cli();
     long LasttimerRateHA =timerRateHA;
     long LasttimerRateDec=timerRateDec;
-    timerRateHA =SiderealRate/10L;
-    timerRateDec=SiderealRate/10L;
+    timerRateHA =SiderealRate/20L;
+    timerRateDec=SiderealRate/20L;
     sei();
     
     // find a park position and store it, the main loop isn't running while we're here
@@ -43,11 +43,8 @@ boolean setPark() {
     EEPROM_writeQuad(EE_posHA ,(byte*)&posHA);
     EEPROM_writeQuad(EE_posDec,(byte*)&posDec);
 
-    // and store our corrections
-    EEPROM_writeQuad(EE_altCor,(byte*)&altCor);
-    EEPROM_writeQuad(EE_azmCor,(byte*)&azmCor);
-    EEPROM_writeQuad(EE_IH,(byte*)&IH);
-    EEPROM_writeQuad(EE_ID,(byte*)&ID);
+    // and the align
+    saveAlignModel();
 
     // and remember what side of the pier we're on
     EEPROM.write(EE_pierSide,pierSide);
@@ -69,15 +66,26 @@ boolean setPark() {
   return false;
 }
 
+boolean saveAlignModel() {
+  // and store our corrections
+  EEPROM_writeQuad(EE_doCor,(byte*)&doCor);
+  EEPROM_writeQuad(EE_pdCor,(byte*)&pdCor);
+  EEPROM_writeQuad(EE_altCor,(byte*)&altCor);
+  EEPROM_writeQuad(EE_azmCor,(byte*)&azmCor);
+  EEPROM_writeQuad(EE_IH,(byte*)&IH);
+  EEPROM_writeQuad(EE_ID,(byte*)&ID);
+  return true;
+}
+
 // takes up backlash and returns to the current position
 boolean parkClearBacklash() {
 
-  // SiderealRate (which is really twice the sidereal rate and another 5X = 10X speed), ignore rate ratios for the moment - we're working in steps
+  // SiderealRate (x10 speed), ignore rate ratios for the moment - we're working in steps
   cli();
   long LasttimerRateHA =timerRateHA;
   long LasttimerRateDec=timerRateDec;
-  timerRateHA =SiderealRate/5L;
-  timerRateDec=SiderealRate/5L;
+  timerRateHA =SiderealRate/10L;
+  timerRateDec=SiderealRate/10L;
   sei();
 
   // figure out how long we'll have to wait at 10x speed for the backlash to clear (+10%)
@@ -134,7 +142,7 @@ byte park() {
         
         // now, slew to this target HA,Dec
         byte gotoPierSide=EEPROM.read(EE_pierSide);
-        goToEx(tempHA,tempDec,gotoPierSide);
+        goTo(tempHA,tempDec,gotoPierSide);
 
         return 0;
       } else return 1; // no park position saved
@@ -158,11 +166,15 @@ boolean unpark() {
         sei();
   
         // get corrections
+        EEPROM_readQuad(EE_doCor,(byte*)&doCor);
+        EEPROM_readQuad(EE_pdCor,(byte*)&pdCor);
         EEPROM_readQuad(EE_altCor,(byte*)&altCor);
         EEPROM_readQuad(EE_azmCor,(byte*)&azmCor);
         EEPROM_readQuad(EE_IH,(byte*)&IH);
         EEPROM_readQuad(EE_ID,(byte*)&ID);
-  
+
+        azmCor=-azmCor;
+        
         // see what side of the pier we're on
         pierSide=EEPROM.read(EE_pierSide);
         if (pierSide==PierSideWest) DecDir = DecDirWInit; else DecDir = DecDirEInit;
@@ -180,6 +192,5 @@ boolean unpark() {
   };
   return false;
 }
-
 
 
