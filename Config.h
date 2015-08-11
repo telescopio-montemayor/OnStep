@@ -69,10 +69,6 @@
 // optional stepper driver Enable support is always on (no setting,) just wire Enable to Pins 25 (HA) and 30 (Dec) and OnStep will pull these pins High (Teensy3.1 Pins 16,21)
 // to disable stepper drivers on startup and when Parked. An Align or UnPark will enable the drivers.
 
-// enables Goto speed equalization for differing right ascension and declination StepsPerDegreeHA/Dec, default=OFF
-// must be _ON when StepsPerDegreeHA isn't equal to StepsPerDegreeDec (limited testing done)
-#define DEC_RATIO_OFF
-
 // enables Horizon coordinate goto functions, default=ON
 #define ALT_AZM_GOTO_ON
 
