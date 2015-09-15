@@ -341,7 +341,7 @@ double ac_sindec,ac_cosdec,ac_cosha;
 double ac_sinalt;
 
 double getApproxDec() {
-  return ac_Dec;
+  return ac_De;
 }
 
 boolean do_alt_calc() {
