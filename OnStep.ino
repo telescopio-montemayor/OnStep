@@ -942,7 +942,7 @@ void setup() {
   // get the Goto rate
   maxRate=EEPROM_readInt(EE_maxRate)*16L;
   // constrain values to the limits
-  if (maxRate<2L*16L) maxRate=2L*16L; if (maxRate>10000*16) maxRate=10000L*16L;
+  if (maxRate<2L*16L) maxRate=2L*16L; if (maxRate>10000L*16L) maxRate=10000L*16L;
   #ifdef RememberMaxRate_OFF
   if (maxRate!=MaxRate*16L) { maxRate=MaxRate*16L; EEPROM_writeInt(EE_maxRate,(int)(maxRate/16L)); }
   #endif
@@ -1118,7 +1118,7 @@ void loop() {
       // I'm shooting for keeping OnStep reliable for about 50 days of continuous uptime (until millis() rolls over)
       // really working with a single and should have, just barely, enough significant digits to get us through a day
       unsigned long lst_now=lst_start+round( (double)((m-lst_mS_start)/10.0) * 1.00273790935);
-      if ((lst_now-lst_start)>24*3600*100) update_lst();
+      if ((lst_now-lst_start)>24L*3600L*100L) update_lst();
 
      // finally, adjust the tracking rate on-the-fly to compensate for refraction
      if (refraction) CEquToTracRateCor();
