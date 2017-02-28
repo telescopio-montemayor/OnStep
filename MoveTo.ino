@@ -5,99 +5,137 @@
 void moveTo() {
   // HA goes from +90...0..-90
   //                W   .   E
+  // meridian flip, first phase.  only happens for GEM mounts
   if ((pierSide==PierSideFlipEW1) || (pierSide==PierSideFlipWE1)) {
+    
     // save destination
     cli(); 
-    origTargetHA =targetHA; 
+    origTargetHA =longToFixed(targetHA);
     origTargetDec=targetDec;
  
-    // first phase, move to 90 HA
-    timerRateHA =SiderealRate*2;
-    #ifdef DEC_RATIO_ON
-    timerRateDec=SiderealRate*timerRateRatio;
-    #else
+    // first phase, move to 60 HA (4 hours)
+    timerRateHA =SiderealRate;
     timerRateDec=SiderealRate;
-    #endif
-
-    // just move HA, not the declination yet
-    if (pierSide==PierSideFlipWE1) targetHA=-90L*StepsPerDegreeHA; else targetHA=90L*StepsPerDegreeHA; 
-    targetDec=posDec;
     sei();
-    
+
+    // default
+    cli(); 
+    if (pierSide==PierSideFlipWE1) targetHA=-60L*StepsPerDegreeHA; else targetHA=60L*StepsPerDegreeHA;
+    targetDec=celestialPoleDec*StepsPerDegreeDec;
+    sei();
+
+    cli();
+    if (celestialPoleDec>0) {
+      // if Dec is in the general area of the pole, slew both axis back at once
+      if ((posDec/(double)StepsPerDegreeDec)>90-latitude) {
+        if (pierSide==PierSideFlipWE1) targetHA=-celestialPoleHA*StepsPerDegreeHA; else targetHA=celestialPoleHA*StepsPerDegreeHA;
+      } else {
+        // override if we're at a low latitude and in the opposite sky, leave the HA alone
+        if ((abs(latitude)<45.0) && (posDec<0)) {
+          if (pierSide==PierSideFlipWE1) targetHA=-45L*StepsPerDegreeHA; else targetHA=45L*StepsPerDegreeHA;
+        }
+      }
+    } else {
+      // if Dec is in the general area of the pole, slew both axis back at once
+      if ((posDec/(double)StepsPerDegreeDec)<-90-latitude) {
+        if (pierSide==PierSideFlipWE1) targetHA=-celestialPoleHA*StepsPerDegreeHA; else targetHA=celestialPoleHA*StepsPerDegreeHA; 
+      } else { 
+        // override if we're at a low latitude and in the opposite sky, leave the HA alone
+        if ((abs(latitude)<45.0) && (posDec>0)) {
+          if (pierSide==PierSideFlipWE1) targetHA=-45L*StepsPerDegreeHA; else targetHA=45L*StepsPerDegreeHA; 
+        }
+      }
+    }
+    sei();
+
+    fTargetHA =longToFixed(targetHA);
+    fTargetDec=longToFixed(targetDec);
+
     pierSide++;
   }
+
+  long distStartHA,distStartDec,distDestHA,distDestDec;
+
   cli();
-  long distStartHA=abs(posHA-startHA);           // distance from start HA
-  long distStartDec=abs(posDec-startDec);        // distance from start Dec
-  long distDestHA;
-  long distDestDec;
+  distStartHA=abs(posHA-startHA);           // distance from start HA
+  distStartDec=abs(posDec-startDec);        // distance from start Dec
+  sei();
+  if (distStartHA<1)  distStartHA=1;
+  if (distStartDec<1) distStartDec=1;
   
   Again:
-  distDestHA =abs(posHA-targetHA);               // distance from dest HA
-  distDestDec =abs(posDec-targetDec);            // distance from dest Dec
+  cli();
+  distDestHA=abs(posHA-targetHA);           // distance from dest HA
+  distDestDec=abs(posDec-targetDec);        // distance from dest Dec
+  sei();
+  if (distDestHA<1)  distDestHA=1;
+  if (distDestDec<1) distDestDec=1;
 
   // quickly slow the motors and stop in 1 degree
   if (abortSlew) {
-    // aborts the meridian flip
+    // aborts any meridian flip
     if ((pierSide==PierSideFlipWE1) || (pierSide==PierSideFlipWE2) || (pierSide==PierSideFlipWE3)) pierSide=PierSideWest;
     if ((pierSide==PierSideFlipEW1) || (pierSide==PierSideFlipEW2) || (pierSide==PierSideFlipEW3)) pierSide=PierSideEast;
 
-    // set the destination near where we are now    
-    if (distDestHA>StepsPerDegreeHA)   { if (posHA>targetHA)   targetHA =posHA-StepsPerDegreeHA;   else targetHA =posHA +StepsPerDegreeHA;  }
-    if (distDestDec>StepsPerDegreeDec) { if (posDec>targetDec) targetDec=posDec-StepsPerDegreeDec; else targetDec=posDec+StepsPerDegreeDec; }
-
+    // set the destination near where we are now
+    // todo: the new targetHA/Dec should be checked against the old targetHA/Dec, if the old targetHA/Dec is closer than use it
+    cli();
+    if (distDestHA>StepsPerDegreeHA)   { if (posHA>targetHA)   targetHA =posHA-StepsPerDegreeHA;   else targetHA =posHA +StepsPerDegreeHA; fTargetHA=longToFixed(targetHA); }
+    if (distDestDec>StepsPerDegreeDec) { if (posDec>targetDec) targetDec=posDec-StepsPerDegreeDec; else targetDec=posDec+StepsPerDegreeDec; fTargetDec=longToFixed(targetDec); }
+    sei();
+    
     abortSlew=false;
     goto Again;
   }
-  
-  sei();
 
   // First, for Right Ascension
-  double temp;
+  unsigned long temp;
   if (distStartHA>distDestHA) {
-    temp=(StepsForRateChange/sqrt(distDestHA));       // 50000/40000=1.02  50000/10=5000 slow down the slew
-//    if ((temp<100) && (temp>=10))  temp=101;        // exclude a range of speeds
+    temp=(StepsForRateChange/isqrt32(distDestHA));    // slow down (temp gets bigger)
+//  if ((temp<100) && (temp>=10))  temp=101;          // exclude a range of speeds
   } else {
-    temp=(StepsForRateChange/sqrt(distStartHA));      // speed up the slew
-//    if ((temp<100) && (temp>=10))  temp=9;          // exclude a range of speeds
+    temp=(StepsForRateChange/isqrt32(distStartHA));   // speed up (temp gets smaller)
+//  if ((temp<100) && (temp>=10))  temp=9;            // exclude a range of speeds
   }
-  if (temp<MaxRate*16)      temp=MaxRate*16;          // fastest rate
-  if (temp>SiderealRate/2L) temp=SiderealRate/2L;     // slowest rate (4x sidereal), remember SiderealRate is actually twice the sidereal rate
-
-  cli();  timerRateHA=temp;  sei();
+  if (temp<maxRate) temp=maxRate;                     // fastest rate
+  if (temp>TakeupRate) temp=TakeupRate;               // slowest rate (4x sidereal)
+  cli(); timerRateHA=temp; sei();
 
   // Now, for Declination
   if (distStartDec>distDestDec) {
-      temp=(StepsForRateChange/sqrt(distDestDec));    // 50000/40000=1.02  50000/10=5000 slow down the slew
-//      if ((temp<100) && (temp>=10))  temp=101;      // exclude a range of speeds
+      temp=(StepsForRateChange/isqrt32(distDestDec)); // slow down
+//    if ((temp<100) && (temp>=10))  temp=101;        // exclude a range of speeds
     } else {
-      temp=(StepsForRateChange/sqrt(distStartDec));   // speed up the slew
-//      if ((temp<100) && (temp>=10))  temp=9;        // exclude a range of speeds
+      temp=(StepsForRateChange/isqrt32(distStartDec));// speed up
+//    if ((temp<100) && (temp>=10))  temp=9;          // exclude a range of speeds
     }
-  #ifdef DEC_RATIO_ON
-  if (temp<MaxRate*16*timerRateRatio) temp=MaxRate*16*timerRateRatio; // fastest rate
-  #else
-  if (temp<MaxRate*16)                temp=MaxRate*16;
-  #endif
-  if (temp>SiderealRate/2L) temp=SiderealRate/2L;     // slowest rate (4x sidereal)
-
+#ifdef MaxRateDecRatio
+  if (temp<maxRate*MaxRateDecRatio) temp=maxRate*MaxRateDecRatio; // fastest rate
+#else
+  if (temp<maxRate) temp=maxRate;                     // fastest rate
+#endif
+  if (temp>TakeupRate) temp=TakeupRate;               // slowest rate (4x sidereal)
   cli(); timerRateDec=temp; sei();
 
   if ((distDestHA<=2) && (distDestDec<=2)) { 
     if ((pierSide==PierSideFlipEW2) || (pierSide==PierSideFlipWE2)) {
+      // make sure we're at the home position when flipping sides of the mount
+      cli();
+      startHA=posHA; if (pierSide==PierSideFlipWE2) targetHA=-celestialPoleHA*StepsPerDegreeHA; else targetHA=celestialPoleHA*StepsPerDegreeHA; 
+      startDec=posDec; targetDec=celestialPoleDec*StepsPerDegreeDec; 
+      sei();
+      fTargetHA=longToFixed(targetHA);
+      fTargetDec=longToFixed(targetDec);
       pierSide++;
-      // move to the home position first when flipping sides of the mount
-      cli(); startDec=posDec; targetDec=90L*StepsPerDegreeDec; sei();
     } else
     if ((pierSide==PierSideFlipEW3) || (pierSide==PierSideFlipWE3)) {
       
-      cli();
       // the blDec gets "reversed" when we Meridian flip, since the NORTH/SOUTH movements are reversed
-    // 80  =   120     - 40
-      blDec=backlashDec-blDec;
-      sei();
+      cli(); blDec=backlashDec-blDec; sei();
+      // also the Index is reversed since we just flipped 180 degrees
+      ID=-ID;
 
-      if (pierSide==PierSideFlipEW3) { 
+      if (pierSide==PierSideFlipEW3) {
         pierSide=PierSideWest;
         cli();
         // reverse the Declination movement
@@ -120,46 +158,69 @@ void moveTo() {
       // now complete the slew
       cli();
       startHA  =posHA;
-      targetHA =origTargetHA;
+      targetHA =fixedToLong(origTargetHA);
       startDec =posDec;
       targetDec=origTargetDec;
       sei();
+      fTargetHA=origTargetHA;
+      fTargetDec=longToFixed(targetDec);
     } else {
-      // restore normal sidereal tracking 2x in RA, 1x in Dec
+      // restore last tracking state
       trackingState=lastTrackingState;
-      cli(); 
+      SetSiderealClockRate(siderealInterval);
+
+      cli();
       timerRateHA  =SiderealRate;
-      #ifdef DEC_RATIO_ON
-      timerRateDec =SiderealRate*2*timerRateRatio;
-      #else
-      timerRateDec =SiderealRate*2;
-      #endif
+      timerRateDec =SiderealRate;
       sei();
       
       // other special gotos: for parking the mount and homeing the mount
       if (parkStatus==Parking) {
+
         // give the drives a moment to settle in
         delay(3000);
+
         if ((posHA==targetHA) && (posDec==targetDec)) {
           
           if (parkClearBacklash()) {
             // success, we're parked
             parkStatus=Parked; EEPROM.write(EE_parkStatus,parkStatus);
-            
-            // and store our pointing model too, just in-case something was updated
-            EEPROM_writeQuad(EE_altCor,(byte*)&altCor);
-            EEPROM_writeQuad(EE_azmCor,(byte*)&azmCor);
+
+            // just store the indexes of our pointing model
             EEPROM_writeQuad(EE_IH,(byte*)&IH);
             EEPROM_writeQuad(EE_ID,(byte*)&ID);
- 
-          } else parkStatus=ParkFailed;
+            
+            // disable the stepper drivers
+            digitalWrite(HA_EN,HIGH);
+            digitalWrite(DE_EN,HIGH);
 
+
+          } else parkStatus=ParkFailed;
       } else parkStatus=ParkFailed;
 
       } else
-        if (homeMount) { setHome(); homeMount=false; atHome=true; }
+        if (homeMount) { 
+          setHome(); 
+          homeMount=false; 
+          atHome=true;
+        }
     }
   }
 }
 
+// fast integer square root routine, Integer Square Roots by Jack W. Crenshaw
+uint32_t isqrt32 (uint32_t n) {
+    register uint32_t root=0, remainder, place= 0x40000000;
+    remainder = n;
 
+    while (place > remainder) place = place >> 2;
+    while (place) {
+        if (remainder >= root + place) {
+            remainder = remainder - root - place;
+            root = root + (place << 1);
+        }
+        root = root >> 1;
+        place = place >> 2;
+    }
+    return root;
+}

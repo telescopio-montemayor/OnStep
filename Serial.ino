@@ -29,6 +29,11 @@ void Serial_Init(unsigned int baud) {
            (0 << UMSEL00);
 }
 
+void Serial_send(const char data[]) {
+  Serial_print(data);
+  do {} while (Serial_transmit());
+}
+
 // Loads up a string to send
 void Serial_print(const char data[])
 {
@@ -52,11 +57,10 @@ boolean Serial_available()
 char Serial_read()
 {
   char c;
-//  cli();
+  cli();
   Serial_recv_buffer[Serial_recv_tail]=(char)0; // always mark the tail
   c=Serial_recv_buffer[Serial_recv_head];
-//  sei();
-//  char c1[4]="?"; c1[0]=c; c1[1]=0; Serial_print(c1);
+  sei();
   if (c!=0) Serial_recv_head++; // buffer is 256 bytes so this byte variable wraps automatically
   return c;
 }
@@ -84,6 +88,12 @@ void Serial1_Init(unsigned int baud) {
   UCSR1C = (1 << UCSZ11) | (1 << UCSZ10) | (0 << USBS1)   |
            (0 << UPM11)  | (0 << UPM10)  | (0 << UMSEL11) |
            (0 << UMSEL10);
+}
+
+void Serial1_send(const char data[])
+{
+  Serial1_print(data);
+  do {} while (Serial1_transmit());
 }
 
 // Loads up a string to sen
@@ -117,12 +127,15 @@ char Serial1_read()
   return c;
 }
 
-
 #else  // on non-AVR platforms, try to use the built-in serial stuff...
-
 
 void Serial_Init(unsigned int baud) {
   Serial.begin(baud);
+}
+
+void Serial_send(const char data[]) {
+  Serial.print(data);
+  do {} while (Serial_transmit());
 }
 
 void Serial_print(const char data[]) {
@@ -143,6 +156,12 @@ char Serial_read() {
 
 void Serial1_Init(unsigned int baud) {
   Serial1.begin(baud);
+}
+
+void Serial1_send(const char data[])
+{
+  Serial1_print(data);
+  do {} while (Serial1_transmit());
 }
 
 void Serial1_print(const char data[]) {

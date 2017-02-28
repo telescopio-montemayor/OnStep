@@ -58,7 +58,7 @@ boolean doubleToHms(char *reply, double *f) {
     s1=s1*60;
   } else {
     s1=s1*10;
-    s[9]=':'; s[12]='1';
+    s[9]='.'; s[12]='1';
   }
   sprintf(reply,s,h1,(int)m1,(int)s1);
 
@@ -97,14 +97,14 @@ boolean dmsToDouble(double *f, char *dms, boolean sign_present) {
 
   // determine if the sign was used and accept it if so
   if (sign_present) {
-    if (*dms=='-') sign=-1.0; else if (*dms=='+') sign=1.0; else return false; *dms++;
-    d[0]=*dms++; d[1]=*dms++; d[2]=0; if (!atoi2(d,&d1)) return false;
+    if (*dms=='-') sign=-1.0; else if (*dms=='+') sign=1.0; else return false; 
+    dms++; d[0]=*dms++; d[1]=*dms++; d[2]=0; if (!atoi2(d,&d1)) return false;
   } else {
     d[0]=*dms++; d[1]=*dms++; d[2]=*dms++; d[3]=0; if (!atoi2(d,&d1)) return false;
   }
 
   // make sure the seperator is an allowed character
-  if ((*dms!=':') && (*dms!='*') && (*dms!=char(223))) return false; else *dms++; 
+  if ((*dms!=':') && (*dms!='*') && (*dms!=char(223))) return false; else dms++; 
 
   m[0]=*dms++; m[1]=*dms++; m[2]=0; if (!atoi2(m,&m1)) return false;
 
@@ -164,90 +164,228 @@ boolean atoi2(char *a, int *i) {
   return true;
 }
 
-// takes the actual equatorial coordinates and applies the offset correction
-// this takes approx. 5mS, which should be ok for not delaying things too much in the main loop
-boolean EquToCEqu(double Lat, double HA, double Dec, double *HA1, double *Dec1) { 
-  double Alt;
-  double Azm;
+// takes the topocentric refracted coordinates and applies corrections to arrive at instrument equatorial coordinates 
+boolean EquToCEqu(double Lat, double HA, double Dec, double *HA1, double *Dec1) {
+  if (Dec>+90.0) Dec=+90.0;
+  if (Dec<-90.0) Dec=-90.0;
 
+  // breaks-down near the pole (limited to >1' from pole)
   if (abs(Dec)<89.98333333) {
-    // breaks-down near the pole (limited to >1' from pole),
-    // when time allows, I'll look into fixing this - but for now I'll just do a crude work-around
-    EquToHor(Lat,HA,Dec,&Alt,&Azm);
-    HorToEqu(Lat+altCor,Alt,Azm+azmCor,HA1,Dec1);
+    double h =HA/(Rad/15.0);
+    double d =Dec/Rad;
+    double dSin=sin(d);
+    double dCos=cos(d);
+    double p=1.0; if (pierSide==PierSideWest) p=-1.0;
+
+    // ------------------------------------------------------------
+    // misalignment due to tube/optics not being perp. to Dec axis
+    // negative numbers are further (S) from the NCP, swing to the
+    // equator and the effect on declination is 0. At the SCP it
+    // becomes a (N) offset.  Unchanged with meridian flips.
+    // expressed as a correction to the Polar axis misalignment
+    double DOh = doCor*(1.0/dCos)*p;
+
+    // ------------------------------------------------------------
+    // misalignment due to Dec axis being perp. to RA axis
+    double PDh =-pdCor*(dSin/dCos)*p;
+
+    // polar misalignment
+    double h1=-azmCor*cos(h)*(dSin/dCos) + altCor*sin(h)*(dSin/dCos);
+    double d1=+azmCor*sin(h)             + altCor*cos(h);
+    *HA1 =HA +((h1+PDh+DOh)/15.0);
+    *Dec1=Dec+  d1;
   } else {
-    // just ignore the pointing model if right on the pole
+    // just ignore the the correction if right on the pole
     *HA1 =HA;
     *Dec1=Dec;
-    return false;
+  }
+
+  while (*HA1>+12.0) *HA1-=24.0;
+  while (*HA1<-12.0) *HA1+=24.0;
+  
+  // switch to under the pole coordinates
+  if ((Lat>=0) && ((abs(*HA1)>(double)underPoleLimit))) {
+    *HA1 =*HA1-12; while (*HA1<-12.0) *HA1=*HA1+24.0;
+    *Dec1=(90.0-*Dec1)+90.0;
+  }
+  if ((Lat<0) && ((abs(*HA1)>(double)underPoleLimit) )) {
+    *HA1 =*HA1-12; while (*HA1<-12.0) *HA1=*HA1+24.0;
+    *Dec1=(-90.0-*Dec1)-90.0;
   }
 
   // finally, apply index offsets... range limits are disabled here, we're working with offset coords
   *HA1=*HA1-IH;
   *Dec1=*Dec1-ID;
+
+  while (*HA1>+12.0) *HA1-=24.0;
+  while (*HA1<-12.0) *HA1+=24.0;
   return true;
 }
 
-// takes the offset corrected coordinates and returns the actual equatorial coordinates 
-// this takes approx. 5mS, which should be ok for not delaying things too much in the main loop
+// takes the instrument equatorial coordinates and applies corrections to arrive at topocentric refracted coordinates
 boolean CEquToEqu(double Lat, double HA, double Dec, double *HA1, double *Dec1) { 
-  double Alt;
-  double Azm;
-
   // remove the index offsets
   HA=HA+IH;
   Dec=Dec+ID;
-  if (Dec>+90.0) Dec=+90.0;
-  if (Dec<-90.0) Dec=-90.0;
 
+  // un-do, under the pole
+  if (Dec>90.0) { Dec=(90.0-Dec)+90; HA=HA-12; }
+  if (Dec<-90.0) { Dec=(-90.0-Dec)-90.0; HA=HA-12; }
+
+  // breaks-down near the pole (limited to >1' from pole)
   if (abs(Dec)<89.98333333) {
-    // breaks-down near the pole (limited to >1' from pole),
-    // when time allows, I'll look into fixing this - but for now I'll just do a crude work-around
-    EquToHor(Lat,HA,Dec,&Alt,&Azm);
-    HorToEqu(Lat-altCor,Alt,Azm-azmCor,HA1,Dec1);
-    return true;
+    double h =HA/(Rad/15.0);
+    double d =Dec/Rad;
+    double dSin=sin(d);
+    double dCos=cos(d);
+    double p=1.0; if (pierSide==PierSideWest) p=-1.0;
+
+    // ------------------------------------------------------------
+    // misalignment due to tube/optics not being perp. to Dec axis
+    // negative numbers are further (S) from the NCP, swing to the
+    // equator and the effect on declination is 0. At the SCP it
+    // becomes a (N) offset.  Unchanged with meridian flips.
+    // expressed as a correction to the Polar axis misalignment
+    double DOh = doCor*(1.0/dCos)*p;
+
+    // as the above offset becomes zero near the equator, the affect
+    // works on HA instead.  meridian flips effect this in HA
+    double PDh =-pdCor*(dSin/dCos)*p;
+
+    // ------------------------------------------------------------
+    // polar misalignment
+    double h1=-azmCor*cos(h)*(dSin/dCos) + altCor*sin(h)*(dSin/dCos);
+    double d1=+azmCor*sin(h)             + altCor*cos(h);
+    *HA1 =HA -((h1+PDh+DOh)/15.0);
+    *Dec1=Dec-  d1;
   } else {
-    // just ignore the pointing model if right on the pole
+    // just ignore the the correction if right on the pole
     *HA1=HA;
     *Dec1=Dec;
-    return false;
   }
+
+  while (*HA1>+12.0) *HA1-=24.0;
+  while (*HA1<-12.0) *HA1+=24.0;
+  if (*Dec1>+90.0) *Dec1=+90.0;
+  if (*Dec1<-90.0) *Dec1=-90.0;
+  return true;
 }
 
 // convert equatorial coordinates to horizon
-// this takes approx. 1-2mS
+// this takes approx. 1.4mS
 void EquToHor(double Lat, double HA, double Dec, double *Alt, double *Azm) {
-  double SinAlt;  
-  double CosAzm;  
+//  while (HA>+12.0) HA=HA-24.0;
+//  while (HA<-12.0) HA=HA+24.0;
+//  if (Dec>+90.0) Dec=+90.0;
+//  if (Dec<-90.0) Dec=-90.0;
 
   HA =(HA*15.0)/Rad;
   Dec=Dec/Rad;
   Lat=Lat/Rad;
   
-  SinAlt = (sin(Dec) * sin(Lat)) + (cos(Dec) * cos(Lat) * cos(HA));  
+  double SinAlt = (sin(Dec) * sin(Lat)) + (cos(Dec) * cos(Lat) * cos(HA));  
   *Alt   = asin(SinAlt);
-  CosAzm = ((sin(Dec) - (sin(Lat) * sin(*Alt))) / (cos(Lat) * cos(*Alt)));  
+  double CosAzm = ((sin(Dec) - (sin(Lat) * SinAlt)) / (cos(Lat) * cos(*Alt)));  
   *Azm   = acos(CosAzm)*Rad;
   if (sin(HA) > 0) { *Azm = 360.0 - *Azm; }
   *Alt = *Alt*Rad;
 }
       
 // convert horizon coordinates to equatorial
-// this takes approx. 1-2mS
+// this takes approx. 1.4mS
 void HorToEqu(double Lat, double Alt, double Azm, double *HA, double *Dec) { 
-  double SinDec;  
-  double CosHA;
-      
   Alt  = Alt/Rad;
   Azm  = Azm/Rad;
   Lat  = Lat/Rad;
-  SinDec = (sin(Alt) * sin(Lat)) + (cos(Alt) * cos(Lat) * cos(Azm));  
+  double SinDec = (sin(Alt) * sin(Lat)) + (cos(Alt) * cos(Lat) * cos(Azm));  
   *Dec = asin(SinDec); 
-  CosHA = ((sin(Alt) - (sin(Lat) * sin(*Dec))) / (cos(Lat) * cos(*Dec)));  
+  double CosHA = ((sin(Alt) - (sin(Lat) * SinDec)) / (cos(Lat) * cos(*Dec)));  
   *HA = acos(CosHA)*Rad;
   if (sin(Azm) > 0) { *HA = 360 - *HA; }
   *Dec = *Dec*Rad;
   *HA  = *HA/15.0;
+
+  while (*HA>+12.0) *HA=*HA-24.0;
+  while (*HA<-12.0) *HA=*HA+24.0;
+  //if (*Dec>+90.0) *Dec=+90.0;
+  //if (*Dec<-90.0) *Dec=-90.0;
+}
+
+// returns the amount of refraction (in arcminutes) at given altitude (degrees), pressure (millibars), and temperature (celsius)
+double Refrac(double Alt, double Pressure=1010.0, double Temperature=15.0) {
+  double TPC=(Pressure/1010.0) * (283.0/(273.0+Temperature));
+  return ( ( 1.02/tan( (Alt+(10.3/(Alt+5.11)))/Rad ) ) ) * TPC;
+}
+
+// adjusts tracking rate to compensate for atmospheric refraction in this area of the sky
+long lastSiderealInterval=0;
+void CEquToTracRateCor() {
+  if (customRateActive) {
+    double Alt1=currentAlt+0.5;
+    double Alt2=currentAlt-0.5;
+      
+    double Alt1_ = Alt1 - ( Refrac(Alt1) / 60.0 );
+    double Alt2_ = Alt2 - ( Refrac(Alt2) / 60.0 );
+  
+    double newSiderealInterval=siderealInterval / ((double)(( Alt1 - Alt2 ) / ( Alt1_ - Alt2_ )));
+    
+    // program the new rate as needed
+    if (lastSiderealInterval!=newSiderealInterval) {
+      Timer1SetRate(newSiderealInterval/100);
+      lastSiderealInterval=newSiderealInterval;
+    }
+  }
+}
+
+// light weight altitude calculation, 16 seconds to complete
+byte ac_step = 0;
+double ac_HA=0,ac_De=0,ac_Dec=0;
+double ac_sindec,ac_cosdec,ac_cosha;
+double ac_sinalt;
+
+double getApproxDec() {
+  return ac_De;
+}
+
+boolean do_alt_calc() {
+  boolean done=false;
+  ac_step++;
+  // load variables
+  if (ac_step==2) {
+    getApproxEqu(&ac_HA,&ac_De,true);
+    ac_Dec=ac_De;
+  } else
+  // convert units
+  if (ac_step==4) {
+    ac_HA =ac_HA/(Rad/15.0);
+    ac_Dec=ac_Dec/Rad;
+  } else
+  // prep Dec
+  if (ac_step==6) {
+    ac_sindec=sin(ac_Dec);
+  } else
+  // prep Dec
+  if (ac_step==8) {
+    ac_cosdec=cos(ac_Dec);
+  } else
+  // prep HA
+  if (ac_step==10) {
+    ac_cosha=cos(ac_HA);
+  } else
+  // calc Alt, phase 1
+  if (ac_step==12) {
+    ac_sinalt = (ac_sindec * sinLat) + (ac_cosdec * cosLat * ac_cosha); 
+  } else
+  // calc Alt, phase 2
+  if (ac_step==14) {
+    currentAlt=asin(ac_sinalt)*Rad;
+  } else
+  // finish
+  if (ac_step==16) {
+    ac_step=0;
+    done=true;
+  }
+  return done;
 }
 
 // converts Gregorian date (Y,M,D) to Julian day number
@@ -342,8 +480,37 @@ double timeRange(double time) {
   return time;
 }
 
+double haRange(double time) {
+  while (time>=12.0) time-=24.0;
+  while (time<-12.0) time+=24.0;
+  return time;
+}
+
 double degreeRange(double d) {
   while (d>=360.0) d-=360.0;
   while (d<  0.0)  d+=360.0;
   return d;
+}
+
+// full long int range
+long fixedToLong(fixed a) {
+  return a>>32;
+}
+
+// full long int range
+fixed longToFixed(long a) {
+  return ((fixed)a)<<32;
+}
+
+// floating point range of +/-255.999999x
+fixed doubleToFixed(double d) {
+// shifted into a long, with a capacity of 31 bits + sign
+  long l = (d*8388608.0);      // shift 23 bits and
+  return ((fixed)l)<<9;        // and 9 more, for 32 bits total
+}
+
+// floating point range of +/-255.999999x
+double fixedToDouble(fixed a) {
+  long l = a>>9;                // shift 9 bits
+  return ((double)l/8388608.0); // and 23 more, for 32 bits total
 }

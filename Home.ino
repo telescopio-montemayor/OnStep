@@ -1,22 +1,24 @@
 // -----------------------------------------------------------------------------------
 // functions related to Homing the mount
 
-// moves telescope to the home position, then stops tracking... I could do a motor sleep here
-// if the sleep pin of the BED's were wired up.  I guess the BED's will remember their micro-step position from sleep?
-// anyway, the scope will still know where it's pointed and a call to ":MS#" etc. will start it up
+// moves telescope to the home position, then stops tracking
 boolean goHome() {
   if (trackingState!=TrackingMoveTo) {
     cli();
     startHA =posHA;
     startDec=posDec;
-    if (pierSide==PierSideWest) targetHA=-90L*StepsPerDegreeHA; else targetHA=90L*StepsPerDegreeHA;
-    targetDec=90L*StepsPerDegreeDec;
+    if (pierSide==PierSideWest) targetHA=-celestialPoleHA*StepsPerDegreeHA; else targetHA=celestialPoleHA*StepsPerDegreeHA;
+    fTargetHA=longToFixed(targetHA);
+    targetDec=celestialPoleDec*StepsPerDegreeDec;
+    fTargetDec=longToFixed(targetDec);
     sei();
     
-    pierSide         = PierSideNone;
+//    pierSide         = PierSideNone;
     lastTrackingState= TrackingNone;
     
     trackingState    = TrackingMoveTo;
+    SetSiderealClockRate(siderealInterval);
+    
     homeMount        = true;
   
     return true;
@@ -26,11 +28,13 @@ boolean goHome() {
 // sets telescope home position; user manually moves to Hour Angle 90 and Declination 90 (CWD position),
 // then the first gotoEqu will set the pier side and turn on tracking
 boolean setHome() {
+ if (trackingState==TrackingMoveTo) return false;  // fail, forcing home not allowed during a move
+
   // default values for state variables
   pierSide            = PierSideNone;
   dirDec              = 1;
   DecDir              = DecDirEInit;
-  HADir               = HADirEInit;
+  if (celestialPoleDec>0) HADir = HADirNCPInit; else HADir = HADirSCPInit;
   dirHA               = 1;
   newTargetRA         = 0;        
   newTargetDec        = 0;
@@ -41,10 +45,23 @@ boolean setHome() {
   
   // reset pointing model
   alignMode           = AlignNone;
-  altCor              = 0; 
+  altCor              = 0;
   azmCor              = 0;
+  doCor               = 0;
+  pdCor               = 0;
   IH                  = 0;
   ID                  = 0;
+  
+  // reset Meridian Flip control
+  #ifdef MOUNT_TYPE_GEM
+  meridianFlip = MeridianFlipAlways;
+  #endif
+  #ifdef MOUNT_TYPE_FORK
+  meridianFlip = MeridianFlipAlign;
+  #endif
+  #ifdef MOUNT_TYPE_FORK_ALT
+  meridianFlip = MeridianFlipNever;
+  #endif
   
   // where we are
   homeMount           = false;
@@ -64,26 +81,38 @@ boolean setHome() {
   parkStatus          = NotParked;
   EEPROM.write(EE_parkStatus,parkStatus);
   
-  // reset PEC  
-  PECstatus           = IgnorePEC;
-  PECrecorded         = false;
-  EEPROM.write(EE_PECstatus,PECstatus);
-  EEPROM.write(EE_PECrecorded,PECrecorded);
+  // reset PEC, unless we have an index to recover from this
+  #ifdef PEC_SENSE_OFF
+    PECstatus           = IgnorePEC;
+    PECrecorded         = false;
+    EEPROM.write(EE_PECstatus,PECstatus);
+    EEPROM.write(EE_PECrecorded,PECrecorded);
+  #else
+    PECstatus           = IgnorePEC;
+    PECstatus  =EEPROM.read(EE_PECstatus);
+  #endif
 
   // the polar home position
-  startHA             = 90L*StepsPerDegreeHA;
-  startDec            = 90L*StepsPerDegreeDec;
+  startHA             = celestialPoleHA*StepsPerDegreeHA;
+  startDec            = celestialPoleDec*StepsPerDegreeDec;
+
+  // clear pulse-guiding state
+  guideDurationHA     = 0;
+  guideDurationLastHA = 0;
+  guideDurationDec    = 0;
+  guideDurationLastDec= 0;
 
   cli();
   targetHA            = startHA;
+  fTargetHA=longToFixed(targetHA);
   posHA               = startHA;
   PEC_HA              = 0;
   targetDec           = startDec;
+  fTargetDec=longToFixed(targetDec);
   posDec              = startDec;
   sei();
 
   return true;
 }
-
 
 

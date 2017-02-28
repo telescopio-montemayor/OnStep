@@ -3,26 +3,23 @@
 
 // syncs the telescope/mount to the sky
 boolean syncEqu(double RA, double Dec) {
-  // hour angle
+  // hour angleTrackingMoveTo
   double HA=LST-RA;
   while (HA>+12.0) HA-=24.0;
   while (HA<-12.0) HA+=24.0;
 
-  // correct for polar offset only by clearing the equatorial offsets
+  // correct for polar misalignment only by clearing the index offsets
   IH=0; ID=0;
   EquToCEqu(latitude,HA,Dec,&HA,&Dec);
-
-  while (HA>+12.0) HA-=24.0;
-  while (HA<-12.0) HA+=24.0;
   
 #ifdef RESCUE_MODE_ON
   // allows one to quickly set where OnStep thinks the 'scope is to anywhere in the western sky
   cli();
   pierSide=PierSideEast;
   DecDir = DecDirEInit;
-  targetHA =round(HA*15.0*(double)StepsPerDegreeHA);
+  targetHA =round(HA*(double)(StepsPerDegreeHA*15L)); ftargetHA=longToFixed(targetHA);
   posHA    =targetHA;
-  targetDec=round(Dec*(double)StepsPerDegreeDec);
+  targetDec=round(Dec*(double)StepsPerDegreeDec); ftargetDec=longToFixed(targetDec);
   posDec=targetDec;
   sei();
   return true;
@@ -32,44 +29,80 @@ boolean syncEqu(double RA, double Dec) {
   // IH/ID are the amount to add to the actual RA/Dec to arrive at the correct position
   // double's are really single's on the ATMega's, and we're a digit or two shy of what's required to
   // hold the steps (for my 11520 steps per degree) but it's still getting down to the arc-sec level
-  // in the western sky hour angles run from   0 to 12
-  // in the eastern sky hour angles run from -12 to 0
-  // -12 - (-11) = -12 + 11 = -1
-  double HA1=((double)targetHA/(double)StepsPerDegreeHA)/15.0;
-  cli();
+  // HA goes from +12...0..-12
+  //                W   .   E
+  // IH and ID values get subtracted to arrive at the correct location
+  double HA1=(double)targetHA/(double)(StepsPerDegreeHA*15L);
   IH=HA-HA1;
-  ID=Dec-((double)targetDec/(double)StepsPerDegreeDec);
-  sei();
+  ID=Dec-(double)targetDec/(double)StepsPerDegreeDec;
 
   if ((abs(ID)>30.0) || (abs(IH)>2.0)) { IH=0; ID=0; return false; } else return true;
 #endif
 }
 
-// this returns the current, uncorrected HA and Dec
+// this returns the telescopes HA and Dec
 void getHADec(double *HA, double *Dec) {
-  cli(); 
-  // get the hour angle
-  *HA=((double)posHA/(double)StepsPerDegreeHA)/15.0;
-  // get the declination
-  *Dec=((double)posDec/(double)StepsPerDegreeDec); 
+  cli();
+  long h=posHA;
+  long d=posDec;
   sei();
-  // adjust HA to +/- 12 hours
-  while (*HA>+12.0) *HA=*HA-24.0;
-  while (*HA<-12.0) *HA=*HA+24.0;
-  // limit declination to +/-90 degrees
-  if (*Dec>+90.0) *Dec=+90.0;
-  if (*Dec<-90.0) *Dec=-90.0;
+  // get the hour angle
+  *HA=(double)h/(double)(StepsPerDegreeHA*15L);
+  // get the declination
+  *Dec=(double)d/(double)StepsPerDegreeDec; 
 }
 
 // gets the telescopes current RA and Dec, set returnHA to true for Horizon Angle instead of RA
-boolean getEqu(double *RA, double *Dec, boolean returnHA) {
+long lastGetEqu=0;
+double lastGetEquLST=0;
+double lastGetEquHA=0;
+double lastGetEquDec=0;
+boolean getEqu(double *RA, double *Dec, boolean returnHA, boolean fast) {
+  unsigned long Tmin=100;
+  if (trackingState==TrackingMoveTo) Tmin=1000;
+
+  // return last values if recent results apply
+  if ((fast) && (millis()-lastGetEqu<Tmin)) {
+    *Dec=lastGetEquDec;
+    // return either the RA or the HA depending on returnHA
+    if (!returnHA) *RA=timeRange(lastGetEquLST-lastGetEquHA); else *RA=lastGetEquHA;
+    return true;
+  }
+  
+  // get the uncorrected HA and Dec
+  getHADec(&lastGetEquHA,Dec);
+  
+  // correct for under the pole, polar misalignment, and index offsets
+  CEquToEqu(latitude,lastGetEquHA,*Dec,&lastGetEquHA,Dec);
+
+  lastGetEquLST=LST;
+  lastGetEquDec=*Dec;
+  lastGetEqu=millis();
+
+  // return either the RA or the HA depending on returnHA
+  if (!returnHA) *RA=timeRange(LST-lastGetEquHA); else *RA=lastGetEquHA;
+  return true;
+}
+
+// gets the telescopes current RA and Dec, set returnHA to true for Horizon Angle instead of RA
+boolean getApproxEqu(double *RA, double *Dec, boolean returnHA) {
   double HA;
   
   // get the uncorrected HA and Dec
   getHADec(&HA,Dec);
   
-  // correct for polar offset, refraction, coordinate systems, etc. as required
-  CEquToEqu(latitude,HA,*Dec,&HA,Dec);
+  // remove the index offsets
+  HA=HA+IH;
+  *Dec=*Dec+ID;
+  
+  // un-do, under the pole
+  if (*Dec>90.0) { *Dec=(90.0-*Dec)+90; HA=HA-12; }
+  if (*Dec<-90.0) { *Dec=(-90.0-*Dec)-90.0; HA=HA-12; }
+
+  while (HA>=12.0) HA=HA-24.0;
+  while (HA<-12.0) HA=HA+24.0;
+  if (*Dec>+90.0) *Dec=+90.0;
+  if (*Dec<-90.0) *Dec=-90.0;
   
   // return either the RA or the HA depending on returnHA
   if (!returnHA) *RA=timeRange(LST-HA); else *RA=HA;
@@ -79,7 +112,7 @@ boolean getEqu(double *RA, double *Dec, boolean returnHA) {
 // gets the telescopes current Alt and Azm
 boolean getHor(double *Alt, double *Azm) {
 double HA,Dec;
-  getEqu(&HA,&Dec,true);
+  getEqu(&HA,&Dec,true,true);
   EquToHor(latitude,HA,Dec,Alt,Azm);
   return true;
 }
@@ -88,44 +121,38 @@ double HA,Dec;
 byte goToEqu(double RA, double Dec) {
   double Alt,Azm,f;
 
-  // fail with position unreachable if we're not unparked
-  if (parkStatus!=NotParked) return 4;
-  // abort goto and fail with position unreachable if we're already moving
-  if (trackingState==TrackingMoveTo) { abortSlew=true; return 5; }
-  
-  // Convert RA into hour angle
+  // Convert RA into hour angle, get altitude
   double HA=LST-RA;
-
-  // Check to see if this goto is valid
+  while (HA>=12.0) HA=HA-24.0;
+  while (HA<-12.0) HA=HA+24.0;
   EquToHor(latitude,HA,Dec,&Alt,&Azm);
 
-  if (Alt<minAlt) return 1; // below horizon
-  if (Alt>maxAlt) return 6; // outside limits
+  // Check to see if this goto is valid
+  if (parkStatus!=NotParked) return 4; // fail, not unparked 
+  if (Alt<minAlt) return 1;            // fail, below horizon
+  if (Alt>maxAlt) return 6;            // fail, outside limits
+  if (Dec>maxDec) return 6;            // fail, outside limits
+  if (Dec<minDec) return 6;            // fail, outside limits
 
-  // correct for polar offset, refraction, coordinate systems, etc. as required
-  if (!EquToCEqu(latitude,HA,Dec,&HA,&Dec)) return 2;
+  // correct for polar offset, refraction, coordinate systems, operation past pole, etc. as required
+  double ha,dec;
+  if (!EquToCEqu(latitude,HA,Dec,&ha,&dec)) return 2; // fail, coordinates invalid
+  long HA1=ha*(double)(StepsPerDegreeHA*15L);
+  long DEC1=dec*(double)StepsPerDegreeDec;
 
-  // important to make sure the HA/Dec are in range at this point
-  while (HA>+12.0) HA=HA-24.0;
-  while (HA<-12.0) HA=HA+24.0;
+  // as above... for the opposite pier side just incase we need to do a meridian flip
+  byte p=pierSide; if (pierSide==PierSideEast) pierSide=PierSideWest; else if (pierSide==PierSideWest) pierSide=PierSideEast;
+  ID=-ID; if (!EquToCEqu(latitude,HA,Dec,&ha,&dec)) { ID=-ID; return 2; } ID=-ID; // fail, coordinates invalid
+  long HA2=ha*(double)(StepsPerDegreeHA*15L);
+  long DEC2=dec*(double)StepsPerDegreeDec;
+  pierSide=p;
 
-  // outside limits, too far under the NCP
-  if (abs(HA)>9.0) return 6;
-
-  long HA1=HA*15.0*(double)StepsPerDegreeHA;
-
-  // check to see if we're doing a meridian flip, if so pre-correct the destination.  ID will get updated during the goTo()
-  // same EXACT math as goTo() uses so we're sure to detect the flip every time
-  if (((pierSide==PierSideEast) && (HA1<-(minutesPastMeridian*StepsPerDegreeHA/4L))) ||
-      ((pierSide==PierSideWest) && (HA1> (minutesPastMeridian*StepsPerDegreeHA/4L)))) {
-    Dec=Dec+ID+ID;
-  }
-
-  if (Dec>+90.0) Dec=+90.0;
-  if (Dec<-90.0) Dec=-90.0;
-  
   // goto function takes HA and Dec in steps
-  return goTo(HA1,Dec*(double)StepsPerDegreeDec);
+  // when in align mode, force pier side
+  byte thisPierSide=PierSideBest;
+  if ((alignMode==AlignOneStar1) || (alignMode==AlignTwoStar1) || (alignMode==AlignThreeStar1)) thisPierSide=PierSideWest;
+  if ((alignMode==AlignTwoStar2) || (alignMode==AlignThreeStar2) || (alignMode==AlignThreeStar3)) thisPierSide=PierSideEast;
+  return goTo(HA1,DEC1,HA2,DEC2,thisPierSide);
 }
 
 // moves the mount to a new Altitude and Azmiuth (Alt,Azm) in degrees
@@ -139,90 +166,87 @@ byte goToHor(double *Alt, double *Azm) {
   return goToEqu(RA,Dec);
 }
 
-// moves the mount to a new Hour Angle and Declination (HA,Dec) and on the specified pier side, if possible
-// if not possible, the mount does a normal goto
-void goToEx(long HASteps, long DecSteps, byte gotoPierSide) {
-  // this only applies if we're not on the correct side
-  if (pierSide!=gotoPierSide) {
-    // if it's possible to do a meridian flip, force it
-    if (pierSide==PierSideEast) {
-      if (HASteps< (minutesPastMeridian*StepsPerDegreeHA/4L)) {
-        pierSide=PierSideFlipEW1;
-        ID=-ID;  // correct the index if we're crossing the meridian
-      }
-    } else
-    if (pierSide==PierSideWest) {
-      if (HASteps>-(minutesPastMeridian*StepsPerDegreeHA/4L)) {
-        pierSide=PierSideFlipWE1; 
-        ID=-ID;  // correct the index if we're crossing the meridian
-      }
-    }
-  }
-  goTo(HASteps,DecSteps);
-}
+// moves the mount to a new Hour Angle and Declination - both are in steps.  Alternate targets are used when a meridian flip occurs
+byte goTo(long thisTargetHA, long thisTargetDec, long altTargetHA, long altTargetDec, byte gotoPierSide) {
+  // HA goes from +90...0..-90
+  //                W   .   E
 
-// moves the mount to a new Hour Angle and Declination (HA,Dec) - both are in steps, all other HA's and Dec's are in Hours and Degrees
-byte goTo(long HASteps, long DecSteps) {
-  // make sure we're not already moving somewhere
-  if ((trackingState==TrackingMoveTo) || moveDirHA || moveDirDec) return 4;
+  // Check to see if this goto is valid
+  if (trackingState==TrackingMoveTo) { abortSlew=true; return 5; }    // fail, prior goto cancelled
+  if (guideDirHA || guideDirDec) return 7;                           // fail, unspecified error
   
   atHome=false;
 
-  cli();
-  timerRateHA=SiderealRate*2;
-  startHA    =posHA;
-  targetHA   =HASteps;
-  sei();
-
-  // handle Meridian flip
-  if (pierSide==PierSideEast) {
-    if (targetHA<-(minutesPastMeridian*StepsPerDegreeHA/4L)) {
-      pierSide=PierSideFlipEW1; 
-      ID=-ID;  // correct the index if we're crossing the meridian
+  if (meridianFlip!=MeridianFlipNever) {
+    // where the allowable hour angles are
+    long eastOfPierMaxHA= underPoleLimit*15*StepsPerDegreeHA;
+    long eastOfPierMinHA=-(minutesPastMeridianE*StepsPerDegreeHA/4L);
+    long westOfPierMaxHA= (minutesPastMeridianW*StepsPerDegreeHA/4L);
+    long westOfPierMinHA=-underPoleLimit*15*StepsPerDegreeHA;
+  
+    // override the defaults and force a flip if near the meridian and possible (for parking and align)
+    if ((gotoPierSide!=PierSideBest) && (pierSide!=gotoPierSide)) {
+      eastOfPierMinHA= (minutesPastMeridianW*StepsPerDegreeHA/4L);
+      westOfPierMaxHA=-(minutesPastMeridianE*StepsPerDegreeHA/4L);
     }
-  } else
-  if (pierSide==PierSideWest) {
-    if (targetHA> (minutesPastMeridian*StepsPerDegreeHA/4L)) {
-      pierSide=PierSideFlipWE1; 
-      ID=-ID;  // correct the index if we're crossing the meridian
+    
+    // if doing a meridian flip, use the opposite pier side coordinates
+    if (pierSide==PierSideEast) {
+      if ((thisTargetHA>eastOfPierMaxHA) || (thisTargetHA<eastOfPierMinHA)) {
+        pierSide=PierSideFlipEW1;
+        thisTargetHA =altTargetHA;
+        thisTargetDec=altTargetDec;
+      }
+    } else
+    if (pierSide==PierSideWest) {
+      if ((thisTargetHA>westOfPierMaxHA) || (thisTargetHA<westOfPierMinHA)) {
+        pierSide=PierSideFlipWE1; 
+        thisTargetHA =altTargetHA;
+        thisTargetDec=altTargetDec;
+      }
+    } else
+    if (pierSide==PierSideNone) {
+      // ID flips back and forth +/-, but that doesn't matter, if we're homed the ID is 0
+      // we're in the polar home position, so pick a side (of the pier)
+      if (thisTargetHA<0) {
+        // west side of pier - we're in the eastern sky and the HA's are negative
+        pierSide=PierSideWest;
+        DecDir  =DecDirWInit;
+        // default, in the polar-home position is +90 deg. HA, we want -90HA
+//        cli(); posHA=posHA-180L*StepsPerDegreeHA; sei();
+        cli(); posHA=-posHA; sei();
+      } else { 
+        // east side of pier - we're in the western sky and the HA's are positive
+        // this is the default in the polar-home position
+        pierSide=PierSideEast;
+        DecDir = DecDirEInit;
+      }
     }
-  } else { 
-    // pierSide=PierSideNone
-    // ID flips back and forth +/-, but that doesn't matter, if we're homed the ID is 0
-    // we're in the polar home position, so pick a side (of the pier)
-    if (targetHA<0) {
-      // west side of pier - we're in the eastern sky and the HA's are negative
-      // default, in the polar-home position is +90 deg. HA
-      pierSide=PierSideWest;
-      DecDir  = DecDirWInit;
-
-      cli();
-      posHA=posHA-180L*StepsPerDegreeHA;
-      startHA=posHA;
-      sei();
-    } else { 
-      // east side of pier - we're in the western sky and the HA's are positive
-      // this is the default in the polar-home position
-      pierSide=PierSideEast;
-      DecDir = DecDirEInit;
+  } else {
+    if (pierSide==PierSideNone) {
+        // always on the "east" side of pier - we're in the western sky and the HA's are positive
+        // this is the default in the polar-home position
+        pierSide=PierSideEast;
+        DecDir = DecDirEInit;
     }
   }
-
-  cli(); 
-  targetDec   =DecSteps;  
-  #ifdef DEC_RATIO_ON
-  timerRateDec=SiderealRate*2*timerRateRatio;
-  #else
-  timerRateDec=SiderealRate*2;
-  #endif
-  startDec    =posDec;
-  sei();
-
+  
   lastTrackingState=trackingState;
-  trackingState    =TrackingMoveTo;
+  trackingState=TrackingMoveTo;
+  SetSiderealClockRate(siderealInterval);
 
+  cli();
+  startHA =posHA;
+  startDec=posDec;
+
+  targetHA =thisTargetHA; fTargetHA=longToFixed(targetHA);
+  targetDec=thisTargetDec; fTargetDec=longToFixed(targetDec);
+
+  timerRateHA=SiderealRate;
+  timerRateDec=SiderealRate;
+  sei();
+  
+  disablePec();
+  
   return 0;
 }
-
-
-
