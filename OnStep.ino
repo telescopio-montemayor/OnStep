@@ -163,7 +163,7 @@
 
 // firmware info, these are returned by the ":GV?#" commands
 #define FirmwareDate   "05 18 15"
-#define FirmwareNumber "1.0b18"
+#define FirmwareNumber "1.0o"
 #define FirmwareName   "On-Step"
 #define FirmwareTime   "12:00:00"
 
