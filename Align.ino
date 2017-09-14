@@ -303,6 +303,7 @@ void TGeoAlign::readCoe() {
   pdCor=EEPROM_readFloat(EE_pdCor);
   altCor=EEPROM_readFloat(EE_altCor);
   azmCor=EEPROM_readFloat(EE_azmCor);
+  geo_ready=true;
 }
 
 void TGeoAlign::writeCoe() {
