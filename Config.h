@@ -33,7 +33,7 @@
 
 // Mount type, default is _GEM (German Equatorial) other options are _FORK, _FORK_ALT.  _FORK switches off Meridian Flips after (1, 2 or 3 star) alignment is done.  _FORK_ALT disables Meridian Flips (1 star align.)
 // _ALTAZM is for Alt/Azm mounted 'scopes (1 star align only.)
-#define MOUNT_TYPE_GEM
+#define MOUNT_TYPE_FORK
 
 // Strict parking, default=OFF.  Set to ON and unparking is only allowed if successfully parked.  Otherwise unparking is allowed if at home and not parked (the Home/Reset command ":hF#" sets this state.) 
 #define STRICT_PARKING_OFF
@@ -116,10 +116,12 @@
                                      // for the most part this doesn't need to be changed, but adjust when needed.  Default=25
 
                                      // Axis1 is for RA/Az
-#define StepsPerDegreeAxis1  14400.0 // calculated as    :  stepper_steps * micro_steps * gear_reduction1 * (gear_reduction2/360)
+                                     // 200 * 32 * 360 / 360 = 6400
+#define StepsPerDegreeAxis1  6400.0  // calculated as    :  stepper_steps * micro_steps * gear_reduction1 * (gear_reduction2/360)
                                      // Takahashi EM10b  :  200           * 8           * 18 * (1.25)     *  144/360              = 14400
                                      // Axis2 is for Dec/Alt
-#define StepsPerDegreeAxis2  14400.0 // calculated as    :  stepper_steps * micro_steps * gear_reduction1 * (gear_reduction2/360)
+                                     // 200 * 32 * 256 / 360 = 4551.11...
+#define StepsPerDegreeAxis2  4551.11 // calculated as    :  stepper_steps * micro_steps * gear_reduction1 * (gear_reduction2/360)
                                      // Takahashi EM10b  :  200           * 8           * 18 * (1.25)     *  144/360              = 14400
                                      // the EM10b has two spur gears that drive the RA/Dec worms, they give an additional 1.25:1 reduction
                                      // in addition to the 18:1 gear heads on the steppers for a 22.5:1 final ratio before the worm/wheels at 144:1
